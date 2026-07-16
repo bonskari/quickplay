@@ -33,7 +33,14 @@ class Cover(QLabel):
         self.setMinimumSize(360, 300)
         self.pix = None
         self._d = None
+        self.on_resize = None
         self.setAlignment(Qt.AlignCenter)
+
+    def resizeEvent(self, e):
+        # overlayt (title, close, min) positioidaan vasta kun coverilla on oikea koko
+        if self.on_resize:
+            self.on_resize()
+        super().resizeEvent(e)
 
     def set_art(self, pixmap):
         self.pix = pixmap
@@ -141,6 +148,7 @@ class QuickPlay(QWidget):
         self.min_btn.clicked.connect(self.showMinimized)
         self.close_btn = wbtn("✕", "rgba(232,72,72,0.85)")   # ✕
         self.close_btn.clicked.connect(self.close)
+        self.cover.on_resize = self.place_overlays
 
         self.seek = QSlider(Qt.Horizontal); self.seek.setRange(0, 0)
         self.seek.sliderMoved.connect(self.player.setPosition)
@@ -197,9 +205,12 @@ class QuickPlay(QWidget):
 
     def resizeEvent(self, e):
         self.card.setGeometry(self.rect())
-        self.title.setGeometry(14, self.cover.height() - 46, self.cover.width() - 28, 40)
-        self.close_btn.setGeometry(self.cover.width() - 36, 10, 26, 26)
-        self.min_btn.setGeometry(self.cover.width() - 68, 10, 26, 26)
+
+    def place_overlays(self):
+        w, h = self.cover.width(), self.cover.height()
+        self.title.setGeometry(14, h - 46, w - 28, 40)
+        self.close_btn.setGeometry(w - 36, 10, 26, 26)
+        self.min_btn.setGeometry(w - 68, 10, 26, 26)
 
     # frameless drag
     def mousePressEvent(self, e):
@@ -231,6 +242,8 @@ class QuickPlay(QWidget):
             self.cover.set_art(QPixmap.fromImage(img))
         t = md.value(QMediaMetaData.Title)
         a = md.value(QMediaMetaData.AlbumArtist) or md.value(QMediaMetaData.ContributingArtist)
+        if isinstance(a, (list, tuple)):
+            a = ", ".join(str(x) for x in a)
         if t:
             self.title.setText(f"{t}\n{a}" if a else str(t))
 
