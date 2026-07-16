@@ -11,12 +11,14 @@ import sys
 import os
 from PySide6.QtCore import Qt, QUrl, QTimer, QPoint, QRectF
 from PySide6.QtGui import (QKeySequence, QShortcut, QPixmap, QPainter, QColor,
-                           QLinearGradient, QPainterPath, QFont)
+                           QLinearGradient, QPainterPath, QFont, QIcon)
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
                                QSlider, QLabel, QToolButton, QStyle, QGraphicsDropShadowEffect)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaMetaData
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 RADIUS = 16
+SERVER_NAME = f"quickplay-{os.getuid()}"
 
 
 def fmt(ms):
@@ -30,11 +32,24 @@ class Cover(QLabel):
         super().__init__()
         self.setMinimumSize(360, 300)
         self.pix = None
+        self._d = None
         self.setAlignment(Qt.AlignCenter)
 
     def set_art(self, pixmap):
         self.pix = pixmap
         self.update()
+
+    # vedä ikkunaa kansikuvasta (draggable kaikkialta)
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._d = e.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, e):
+        if self._d and e.buttons() & Qt.LeftButton:
+            self.window().move(e.globalPosition().toPoint() - self._d)
+
+    def mouseReleaseEvent(self, e):
+        self._d = None
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -77,6 +92,9 @@ class QuickPlay(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(380, 440)
+        ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quickplay.svg")
+        if os.path.exists(ico):
+            self.setWindowIcon(QIcon(ico))
 
         # rounded container
         self.card = QWidget(self)
@@ -103,6 +121,15 @@ class QuickPlay(QWidget):
         self.next_btn = btn(QStyle.SP_MediaSkipForward); self.next_btn.clicked.connect(lambda: self.jump(1))
         for b in (self.prev_btn, self.next_btn):
             b.setVisible(len(self.files) > 1)
+
+        self.loop = False
+        self.loop_btn = btn(QStyle.SP_BrowserReload)
+        self.loop_btn.setCheckable(True)
+        self.loop_btn.setToolTip("Toista uudelleen (loop)")
+        self.loop_btn.setStyleSheet("QToolButton{color:#8a8f96;border:0;padding:6px;}"
+                                    "QToolButton:hover{background:rgba(255,255,255,0.12);border-radius:8px;}"
+                                    "QToolButton:checked{color:#4a9eff;}")
+        self.loop_btn.toggled.connect(lambda v: setattr(self, "loop", v))
 
         def wbtn(txt, hover):
             b = QToolButton(self.cover); b.setText(txt)
@@ -131,6 +158,7 @@ class QuickPlay(QWidget):
         srow.addWidget(self.tpos); srow.addWidget(self.seek, 1); srow.addWidget(self.tdur)
         crow = QHBoxLayout(); crow.setContentsMargins(0, 0, 0, 0)
         crow.addWidget(self.prev_btn); crow.addWidget(self.play_btn); crow.addWidget(self.next_btn)
+        crow.addWidget(self.loop_btn)
         crow.addStretch(1)
         vlab = QLabel("\U0001F509"); vlab.setStyleSheet("color:#cfd3d8;background:transparent;")
         crow.addWidget(vlab); crow.addWidget(self.vol)
@@ -230,16 +258,50 @@ class QuickPlay(QWidget):
 
     def on_status(self, s):
         if s == QMediaPlayer.EndOfMedia:
-            if self.index + 1 < len(self.files):
+            if self.loop:                                  # toista sama uudelleen
+                self.player.setPosition(0); self.player.play()
+            elif self.index + 1 < len(self.files):         # jono eteenpäin
                 self.load(self.index + 1)
-            else:
-                QTimer.singleShot(300, self.close)
+            # jonon lopussa jää auki (ei sulkeudu)
+
+    def open_files(self, files):
+        """Uusi biisi/biisit olemassa olevaan instanssiin — korvaa jonon, soita, nosta."""
+        files = [f for f in files if os.path.exists(f)]
+        if not files:
+            return
+        self.files = files
+        self.load(0)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("QuickPlay")
-    w = QuickPlay(sys.argv[1:])
+    files = [os.path.abspath(f) for f in sys.argv[1:]]
+
+    # jos instanssi jo pyörii → lähetä sille biisit ja poistu
+    sock = QLocalSocket()
+    sock.connectToServer(SERVER_NAME)
+    if sock.waitForConnected(300):
+        sock.write(("\n".join(files)).encode()); sock.flush()
+        sock.waitForBytesWritten(1000); sock.disconnectFromServer()
+        return
+
+    QLocalServer.removeServer(SERVER_NAME)  # siivoa mahd. jämä
+    w = QuickPlay(files)
+
+    server = QLocalServer()
+    server.listen(SERVER_NAME)
+
+    def on_conn():
+        c = server.nextPendingConnection()
+        if c and c.waitForReadyRead(1000):
+            data = bytes(c.readAll()).decode()
+            w.open_files([f for f in data.split("\n") if f])
+    server.newConnection.connect(on_conn)
+
     w.show()
     sys.exit(app.exec())
 
