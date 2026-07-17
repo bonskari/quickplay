@@ -32,7 +32,6 @@ class Cover(QLabel):
         super().__init__()
         self.setMinimumSize(360, 300)
         self.pix = None
-        self._d = None
         self.on_resize = None
         self.setAlignment(Qt.AlignCenter)
 
@@ -46,17 +45,10 @@ class Cover(QLabel):
         self.pix = pixmap
         self.update()
 
-    # vedä ikkunaa kansikuvasta (draggable kaikkialta)
+    # vedä ikkunaa kansikuvasta — startSystemMove toimii myös Waylandilla
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._d = e.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._d and e.buttons() & Qt.LeftButton:
-            self.window().move(e.globalPosition().toPoint() - self._d)
-
-    def mouseReleaseEvent(self, e):
-        self._d = None
+            self.window().windowHandle().startSystemMove()
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -89,7 +81,6 @@ class QuickPlay(QWidget):
         self.files = [f for f in files if os.path.exists(f)]
         self.index = 0
         self._scrub = False
-        self._drag = None
 
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
@@ -212,17 +203,10 @@ class QuickPlay(QWidget):
         self.close_btn.setGeometry(w - 36, 10, 26, 26)
         self.min_btn.setGeometry(w - 68, 10, 26, 26)
 
-    # frameless drag
+    # frameless drag — startSystemMove toimii myös Waylandilla
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None
+            self.windowHandle().startSystemMove()
 
     def load(self, i):
         self.index = i % len(self.files)
